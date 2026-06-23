@@ -52,6 +52,9 @@ class StructuredExtractor:
         {table_text if table_text else "None"}
 
         Return only the JSON array, nothing else.
+        If description says "Signature POS", "POS Purchase", or similar generic terms,
+        infer the likely merchant type from the amount and context and use that as description.
+        For example: $9.99 recurring = likely streaming service, $45-60 = likely restaurant.
         """
 
         response = self.client.chat.completions.create(
