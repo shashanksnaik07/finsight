@@ -57,9 +57,14 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
-        className={`border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer
-          ${dragging ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-blue-400 hover:bg-gray-50"}
-          ${uploading ? "opacity-50 pointer-events-none" : ""}`}
+        style={{
+            border: `2px dashed ${dragging ? "#6366f1" : "#1e2738"}`,
+            borderRadius: 12, padding: "32px 24px", textAlign: "center",
+            cursor: "pointer", transition: "all 0.2s",
+            background: dragging ? "rgba(99,102,241,0.05)" : "transparent",
+            opacity: uploading ? 0.5 : 1,
+            pointerEvents: uploading ? "none" : "auto"
+          }}
         onClick={() => document.getElementById("fileInput")?.click()}
       >
         <input
