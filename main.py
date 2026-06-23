@@ -1,57 +1,61 @@
 import os
 import json
-from src.ingestion.document_loader import DocumentLoader
-from src.extraction.structured_extractor import StructuredExtractor
-from src.utils.calculator import calculate_summary
-from src.utils.storage import save_processed, load_processed
-from src.ingestion.chunker import FinancialChunker
+from src.utils.multi_doc_manager import MultiDocManager
+from src.extraction.benchmarker import FinancialBenchmarker
+from src.extraction.conversation import ConversationEngine
 from src.ingestion.embedder import Embedder
-from src.extraction.query_engine import QueryEngine
+from qdrant_client import QdrantClient
 
-loader = DocumentLoader()
-extractor = StructuredExtractor()
-chunker = FinancialChunker()
+# --- Phase 3: Multi-doc + Benchmarking + Conversation ---
+manager = MultiDocManager()
+benchmarker = FinancialBenchmarker()
 embedder = Embedder()
-engine = QueryEngine(embedder)
+conversation = ConversationEngine(embedder)
+qdrant = QdrantClient(host="localhost", port=6333)
 
-processed_path = "data/processed/test_processed.json"
+# Process all documents in uploads folder
+docs = manager.process_all("data/uploads")
 
-# --- Phase 1 + 2: Load, Extract, Chunk, Embed ---
-if not os.path.exists(processed_path):
-    print("Processing document...")
+# Combined summary across all docs
+combined = manager.get_combined_summary()
+print("\n--- COMBINED SUMMARY ---")
+print(json.dumps(combined, indent=2))
 
-    document = loader.load("data/uploads/test.pdf")
-    structured = extractor.extract(document)
-    calculated = calculate_summary(structured["transactions"], structured["metadata"])
+# Benchmark against 50/30/20 rule
+# Use first doc for benchmarking
+benchmark = benchmarker.benchmark(docs[0]["calculated_summary"])
+print("\n--- 50/30/20 BENCHMARK ---")
+print(f"Needs:   {benchmark['needs_pct']}% (target: <50%)")
+print(f"Wants:   {benchmark['wants_pct']}% (target: <30%)")
+print(f"Savings: {benchmark['savings_pct']}% (target: >20%)")
+print(f"Flags: {benchmark['flags']}")
+print("\nRecommendations:")
+for r in benchmark["recommendations"]:
+    print(f"  - {r}")
 
-    final = {
-        "file_name": structured["file_name"],
-        "metadata": structured["metadata"],
-        "llm_summary": structured["summary"],
-        "calculated_summary": calculated,
-        "transactions": structured["transactions"]
-    }
+# --- Conversational Q&A with memory ---
+def get_context(query: str, limit: int = 5) -> list:
+    vector = embedder.embed_query(query)
+    results = qdrant.query_points(
+        collection_name="finsight",
+        query=vector,
+        limit=limit
+    ).points
+    return [r.payload["text"] for r in results]
 
-    save_processed(final)
+print("\n--- CONVERSATIONAL Q&A ---")
+print("Type your question or 'quit' to exit, 'reset' to clear history.\n")
 
-    chunks = chunker.chunk(final)
-    print(f"Created {len(chunks)} chunks")
-    embedder.embed_chunks(chunks)
+while True:
+    user_input = input("You: ").strip()
+    if user_input.lower() == "quit":
+        break
+    elif user_input.lower() == "reset":
+        conversation.reset()
+        continue
+    elif not user_input:
+        continue
 
-else:
-    print("Document already processed — skipping ingestion.")
-    final = load_processed(processed_path)
-
-# --- Phase 2: Query ---
-questions = [
-    "How much did I spend on food?",
-    "What is my biggest expense category?",
-    "What is my net cashflow this month?",
-    "Am I spending too much on subscriptions?"
-]
-
-for q in questions:
-    result = engine.query(q)
-    print(f"\nQ: {result['question']}")
-    print(f"A: {result['answer']}")
-    print("-" * 50)
+    context = get_context(user_input)
+    answer = conversation.chat(user_input, context)
+    print(f"FinSight: {answer}\n")
