@@ -1,40 +1,57 @@
+import os
+import json
 from src.ingestion.document_loader import DocumentLoader
 from src.extraction.structured_extractor import StructuredExtractor
 from src.utils.calculator import calculate_summary
-from src.utils.storage import save_processed
-import json
+from src.utils.storage import save_processed, load_processed
+from src.ingestion.chunker import FinancialChunker
+from src.ingestion.embedder import Embedder
+from src.extraction.query_engine import QueryEngine
 
 loader = DocumentLoader()
 extractor = StructuredExtractor()
+chunker = FinancialChunker()
+embedder = Embedder()
+engine = QueryEngine(embedder)
 
-# Load + extract
-document = loader.load("data/uploads/test.pdf")
-structured = extractor.extract(document)
+processed_path = "data/processed/test_processed.json"
 
-# Calculate programmatically (never trust LLM for math)
-calculated = calculate_summary(structured["transactions"], structured["metadata"])
+# --- Phase 1 + 2: Load, Extract, Chunk, Embed ---
+if not os.path.exists(processed_path):
+    print("Processing document...")
 
-# Merge everything
-final = {
-    "file_name": structured["file_name"],
-    "metadata": structured["metadata"],
-    "llm_summary": structured["summary"],       # LLM extracted (dates, balances)
-    "calculated_summary": calculated,            # Programmatic (totals, categories)
-    "transactions": structured["transactions"]
-}
+    document = loader.load("data/uploads/test.pdf")
+    structured = extractor.extract(document)
+    calculated = calculate_summary(structured["transactions"], structured["metadata"])
 
-# Save
-save_processed(final)
+    final = {
+        "file_name": structured["file_name"],
+        "metadata": structured["metadata"],
+        "llm_summary": structured["summary"],
+        "calculated_summary": calculated,
+        "transactions": structured["transactions"]
+    }
 
-# Print
-print("\n--- METADATA ---")
-print(json.dumps(final["metadata"], indent=2))
+    save_processed(final)
 
-print("\n--- CALCULATED SUMMARY ---")
-print(json.dumps(final["calculated_summary"], indent=2))
+    chunks = chunker.chunk(final)
+    print(f"Created {len(chunks)} chunks")
+    embedder.embed_chunks(chunks)
 
-print("\n--- SPENDING BY CATEGORY ---")
-for cat, amount in final["calculated_summary"]["spending_by_category"].items():
-    print(f"  {cat}: ${amount}")
+else:
+    print("Document already processed — skipping ingestion.")
+    final = load_processed(processed_path)
 
-print(f"\nTop expense: {final['calculated_summary']['top_expense']}")
+# --- Phase 2: Query ---
+questions = [
+    "How much did I spend on food?",
+    "What is my biggest expense category?",
+    "What is my net cashflow this month?",
+    "Am I spending too much on subscriptions?"
+]
+
+for q in questions:
+    result = engine.query(q)
+    print(f"\nQ: {result['question']}")
+    print(f"A: {result['answer']}")
+    print("-" * 50)
